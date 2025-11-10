@@ -57,22 +57,46 @@ def test_different_dtypes():
     @njit
     def make_float_array():
         return np.array([1.1, 2.2, 3.3], dtype=np.float64)
+
+    @njit
+    def make_float32_array():
+        return np.array([1.1, 2.2, 3.3], dtype=np.float32)
     
     @njit
     def make_bool_array():
         return np.array([True, False, True])
+
+    @njit
+    def make_complex64_array():
+        return np.array([1+2j, 3+4j, 5+6j], dtype=np.complex64)
+
+    @njit
+    def make_complex128_array():
+        return np.array([1+2j, 3+4j, 5+6j], dtype=np.complex128)
     
     print("Int32 array:")
     int_arr = make_int_array()
-    print(f"  Int array: {int_arr.dtype}")
+    print(f"  Int array: {int_arr.dtype}\n")
     
     print("Float64 array:")
     float_arr = make_float_array()
-    print(f"  Float array: {float_arr.dtype}")
+    print(f"  Float array: {float_arr.dtype}\n")
+
+    print("Float32 array:")
+    float32_arr = make_float32_array()
+    print(f"  Float32 array: {float32_arr.dtype}\n")
     
+    print("Complex64 array:")
+    complex64_arr = make_complex64_array()
+    print(f"  Complex64 array: {complex64_arr.dtype}\n")
+
+    print("Complex128 array:")
+    complex128_arr = make_complex128_array()
+    print(f"  Complex128 array: {complex128_arr.dtype}\n")
+
     print("Bool array:")
     bool_arr = make_bool_array()
-    print(f"  Bool array: {bool_arr.dtype}")
+    print(f"  Bool array: {bool_arr.dtype}\n")
 
 def test_array_operations_return():
     """Arrays created through operations"""
