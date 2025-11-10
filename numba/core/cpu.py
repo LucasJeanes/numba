@@ -20,6 +20,8 @@ from numba.np import ufunc_db
 
 # Keep those structures in sync with _dynfunc.c.
 
+# Platform check for s390x
+_IS_S390X = platform.machine() == 's390x'
 
 class ClosureBody(cgutils.Structure):
     _fields = [('env', types.pyobject)]
@@ -51,7 +53,7 @@ class CPUContext(BaseContext):
         self._internal_codegen = codegen.JITCPUCodegen("numba.exec")
 
         # Add ARM ABI functions from libgcc_s
-        if platform.machine() == 'armv7l':
+        if platform.machine() == 'armv7l' or platform.machine() == 's390x':
             ll.load_library_permanently('libgcc_s.so.1')
 
         # Map external C functions.
@@ -262,6 +264,38 @@ class CPUContext(BaseContext):
     def get_ufunc_info(self, ufunc_key):
         return ufunc_db.get_ufunc_info(ufunc_key)
 
+    def get_preferred_array_alignment(self, dtype):
+        '''Return the preferred alignment for the given dtype'''
+        if _IS_S390X:
+            # On s390x, ensure 32-byte alignment for all numeric types
+            # that might benefit from SIMD operations
+            if dtype in (types.float32, types.float64, types.complex64, types.complex128,
+                         types.int32, types.int64, types.uint32, types.uint64):
+                print(f"DEBUG: Overriding alignment for {dtype} to 32 on s390x")
+                return 32
+
+            # For dtypes not specified (above), use dtype's alignment or detault to 16
+            try:
+                alignment = getattr(dtype, 'alignment', 16)
+            except AttributeError:
+                alignment = 16
+
+            result = max(16, alignment)
+            print(f"DEBUG: Using alignment {result} for {dtype} on s390x")
+            return result
+
+        # If platform != s390x, use default alignment logic
+        else:
+            try:
+                # Try calling parent class method to retrieve dtype
+                result = super().get_preferred_array_alignment(dtype)
+                print(f"DEBUG CPUContext: Parent returned alignment {result} for {dtype}")
+                return result
+            except AttributeError:
+                # If all else fails, fall back to type's natural alignment
+                result = 16
+                print(f"DEBUG CPUContext: Using default alignment {result} for {dtype}")
+                return result
 
 # ----------------------------------------------------------------------------
 # TargetOptions

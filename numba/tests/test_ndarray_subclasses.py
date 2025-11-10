@@ -27,7 +27,6 @@ from numba.tests.support import TestCase, MemoryLeakMixin
 
 _logger = None
 
-
 def _do_log(*args):
     if _logger is not None:
         _logger.append(args)
@@ -47,6 +46,74 @@ def use_logger(fn):
         return fn(*args, **kwargs)
     return core
 
+import numpy as np
+
+def create_aligned_array(shape, dtype, alignment=32):
+    """Create a NumPy array with the specified alignment"""
+    # Create a larger buffer to ensure we can find aligned memory
+    extra = alignment // np.dtype(dtype).itemsize
+    buffer = np.empty(shape[0] + extra, dtype=dtype)
+    
+    # Find the aligned offset
+    data_ptr = buffer.__array_interface__['data'][0]
+    offset = (alignment - (data_ptr % alignment)) % alignment
+    offset = offset // np.dtype(dtype).itemsize
+    
+    # Create aligned view
+    aligned_buffer = buffer[offset:offset + shape[0]]
+    return aligned_buffer.reshape(shape)
+
+class TestNdarraySubclasses(MemoryLeakMixin, TestCase):
+    # ... existing code ...
+    
+    @use_logger
+    def test_myarray_allocator_override(self):
+        """
+        Checks that our custom allocator is used
+        """
+        @njit
+        def foo(a):
+            b = a + np.arange(a.size, dtype=np.float64)
+            c = a + 1j
+            return b, c
+
+        # Create an aligned array instead of using np.arange directly
+        buf = create_aligned_array((4,), np.float64, alignment=32)
+        buf[:] = np.arange(4, dtype=np.float64)  # Copy the data
+        a = MyArray(buf.shape, buf.dtype, buf)
+
+        print("=== DEBUG: MyArray info ===")
+        print("type(a):", type(a))
+        print("shape:", getattr(a, "shape", None))
+        print("strides:", getattr(a, "strides", None))
+        print("dtype:", getattr(a, "dtype", None))
+        print("nbytes:", getattr(a, "nbytes", None))
+        print("data ptr:", getattr(a, "__array_interface__", {}).get("data", None))
+        
+        targetctx = cpu_target.target_context
+        from numba import types
+        nb_dtype = types.float64
+        align = targetctx.get_preferred_array_alignment(nb_dtype)
+        print(f"DEBUG: Required alignment for {nb_dtype}: {align}")
+        print("===========================")
+        expected = foo.py_func(a)
+        got = foo(a)
+
+        # DEBUG PRINT
+        print(foo.inspect_types())
+        print(foo.inspect_asm())
+
+        self.assertPreciseEqual(got, expected)
+
+        logged_lines = _logger
+
+        targetctx = cpu_target.target_context
+        nb_dtype = typeof(buf.dtype)
+        align = targetctx.get_preferred_array_alignment(nb_dtype)
+        self.assertEqual(logged_lines, [
+            ("LOG _ol_array_allocate", expected[0].nbytes, align),
+            ("LOG _ol_array_allocate", expected[1].nbytes, align),
+        ])
 
 class MyArray(np.ndarray):
     # Tell Numba to not seamlessly treat this type as a regular ndarray.
@@ -326,8 +393,27 @@ class TestNdarraySubclasses(MemoryLeakMixin, TestCase):
         buf = np.arange(4, dtype=np.float64)
         a = MyArray(buf.shape, buf.dtype, buf)
 
+        print("=== DEBUG: MyArray info ===")
+        print("type(a):", type(a))
+        print("shape:", getattr(a, "shape", None))
+        print("strides:", getattr(a, "strides", None))
+        print("dtype:", getattr(a, "dtype", None))
+        print("nbytes:", getattr(a, "nbytes", None))
+        print("data ptr:", getattr(a, "__array_interface__", {}).get("data", None))
+        
+        targetctx = cpu_target.target_context
+        from numba import types
+        nb_dtype = types.float64
+        align = targetctx.get_preferred_array_alignment(nb_dtype)
+        print(f"DEBUG: Required alignment for {nb_dtype}: {align}")
+        print("===========================")
+        
         expected = foo.py_func(a)
         got = foo(a)
+
+        # DEBUG PRINT
+        print(foo.inspect_types())
+        print(foo.inspect_asm())
 
         self.assertPreciseEqual(got, expected)
 
@@ -340,7 +426,6 @@ class TestNdarraySubclasses(MemoryLeakMixin, TestCase):
             ("LOG _ol_array_allocate", expected[0].nbytes, align),
             ("LOG _ol_array_allocate", expected[1].nbytes, align),
         ])
-
 
 if __name__ == "__main__":
     unittest.main()

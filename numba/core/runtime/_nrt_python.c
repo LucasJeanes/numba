@@ -292,6 +292,15 @@ NRT_adapt_ndarray_from_python(PyObject *obj, arystruct_t* arystruct) {
     ndim = PyArray_NDIM(ndary);
     data = PyArray_DATA(ndary);
 
+        // DEBUG: Print array information to identify which array this is
+    printf("DEBUG NRT_adapt: Adapting array %p with shape (", obj);
+    for (i = 0; i < ndim; i++) {
+        printf("%zd", PyArray_DIM(ndary, i));
+        if (i < ndim - 1) printf(", ");
+    }
+    printf("), dtype=%d\n", PyArray_TYPE(ndary));
+    fflush(stdout);
+
     arystruct->meminfo = NRT_meminfo_new_from_pyobject((void*)data, obj);
     arystruct->data = data;
     arystruct->nitems = PyArray_SIZE(ndary);
@@ -305,6 +314,53 @@ NRT_adapt_ndarray_from_python(PyObject *obj, arystruct_t* arystruct) {
         *p = PyArray_STRIDE(ndary, i);
     }
 
+        // DEBUG: Print the arystruct
+    printf("DEBUG NRT_adapt_ndarray_from_python:\n");
+    printf("  meminfo=%p\n", arystruct->meminfo);
+    printf("  data=%p\n", arystruct->data);
+    printf("  nitems=%zd\n", arystruct->nitems);
+    printf("  itemsize=%zd\n", arystruct->itemsize);
+    printf("  parent=%p\n", arystruct->parent);
+    for (i = 0; i < ndim; i++) {
+        printf("  shape[%d]=%zd\n", i, arystruct->shape_and_strides[i]);
+    }
+    for (i = 0; i < ndim; i++) {
+        printf("  strides[%d]=%zd\n", i, arystruct->shape_and_strides[ndim + i]);
+    }
+    printf("  sizeof(arystruct_t)=%zu\n", sizeof(arystruct_t));
+    printf("  offsetof(data)=%zu\n", offsetof(arystruct_t, data));
+    printf("  offsetof(nitems)=%zu\n", offsetof(arystruct_t, nitems));
+    printf("  offsetof(itemsize)=%zu\n", offsetof(arystruct_t, itemsize));
+    printf("  offsetof(parent)=%zu\n", offsetof(arystruct_t, parent));
+   
+    printf("Size validation:\n");
+    printf("  PyArray_SIZE(ndary)=%zd\n", PyArray_SIZE(ndary));
+    printf("  (int32_t)PyArray_SIZE(ndary)=%d\n", (int32_t)PyArray_SIZE(ndary));
+    printf("  PyArray_ITEMSIZE(ndary)=%zd\n", PyArray_ITEMSIZE(ndary));
+    printf("  (int32_t)PyArray_ITEMSIZE(ndary)=%d\n", (int32_t)PyArray_ITEMSIZE(ndary)); 
+    
+   // printf("Expected vs Actual layout:\n");
+   // printf("Field        Expected  Actual\n");
+   // printf("meminfo      %-9d %d\n", 0, offsetof(arystruct_t, meminfo));
+   // printf("data         %-9d %d\n", 8, offsetof(arystruct_t, data));
+   // printf("nitems       %-9d %d\n", 16, offsetof(arystruct_t, nitems));
+   // printf("itemsize     %-9d %d\n", 24, offsetof(arystruct_t, itemsize));
+   // printf("parent       %-9d %d\n", 32, offsetof(arystruct_t, parent));
+    
+    uintptr_t data_ptr = (uintptr_t)arystruct->data;
+    if (data_ptr % 32 != 0) {
+    	printf("WARNING: Data pointer %p not 32-byte aligned\n", arystruct->data);
+    } else {
+    	printf("Data pointer is 32-byte aligned.\n");
+    }
+    if (data_ptr % 16 != 0) {
+        printf("WARNING: Data pointer %p not 16-byte aligned\n", arystruct->data);
+    } else {
+        printf("Data pointer is 16-byte aligned.\n");
+    }
+
+    	// END DEBUG
+	
     NRT_Debug(nrt_debug_print("NRT_adapt_ndarray_from_python %p\n",
                               arystruct->meminfo));
     return 0;

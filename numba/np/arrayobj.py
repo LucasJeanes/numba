@@ -3,6 +3,7 @@ Implementation of operations on Array objects and objects supporting
 the buffer protocol.
 """
 
+import platform
 import functools
 import math
 import operator
@@ -42,6 +43,9 @@ from numba.core.typing.npydecl import (parse_dtype as ty_parse_dtype,
                                        _sequence_of_arrays,
                                        _choose_concatenation_layout)
 
+
+# Platform check for s390x
+_IS_S390X = platform.machine() == 's390x'
 
 def set_range_metadata(builder, load, lower_bound, upper_bound):
     """
@@ -4303,15 +4307,51 @@ def _empty_nd_impl(context, builder, arrtype, shapes):
 
     dtype = arrtype.dtype
     align_val = context.get_preferred_array_alignment(dtype)
+        # DEBUG: Verify alignment value
+    print(f"DEBUG _empty_nd_impl: Requested alignment for {dtype}: {align_val}")
+    
+    # Double-check this is 32 for s390x
+    if _IS_S390X and align_val != 32:
+        print(f"DEBUG _empty_nd_impl: WARNING: Expected 32-byte alignment but got {align_val}")
+
     align = context.get_constant(types.uint32, align_val)
     args = (context.get_dummy_value(), allocsize, align)
 
-    mip = types.MemInfoPointer(types.voidptr)
-    arytypeclass = types.TypeRef(type(arrtype))
-    argtypes = signature(mip, arytypeclass, types.intp, types.uint32)
+    print(f"DEBUG _empty_nd_impl: Before calling allocator:")
+    print(f"  align_val={align_val}")
+    print(f"  allocsize (as Python int)={allocsize}")
+        # Convert LLVM values back to Python for debugging
+    if hasattr(allocsize, 'constant'):
+        print(f"  allocsize (as constant)={allocsize.constant}")
 
-    meminfo = context.compile_internal(builder, _call_allocator, argtypes, args)
-    data = context.nrt.meminfo_data(builder, meminfo)
+    # Add LLVM IR printing to see the actual values
+    print("DEBUG _empty_nd_impl: LLVM IR for allocsize:")
+    print(allocsize)
+    print("DEBUG _empty_nd_impl: LLVM IR for align:")
+    print(align)
+
+    # Try using the context's NRT allocation directly first
+    try:
+        # Try using the context's NRT allocation
+        print("DEBUG _empty_nd_impl: Attempting direct NRT allocation")
+        meminfo = context.nrt.meminfo_alloc_aligned(builder, allocsize, align)
+        if meminfo is None:
+            print("DEBUG _empty_nd_impl: Direct NRT allocation returned None")
+            context.call_conv.return_user_exc(
+                builder, MemoryError,
+                ("Failed to allocate aligned memory",)
+            )
+        print("DEBUG _empty_nd_impl: Direct NRT allocation succeeded")
+        data = context.nrt.meminfo_data(builder, meminfo)
+    except (AttributeError, NotImplementedError) as e:
+        # Fall back to the original method
+        print(f"DEBUG _empty_nd_impl: Direct NRT allocation failed: {e}, falling back to compile_internal")
+        mip = types.MemInfoPointer(types.voidptr)
+        arytypeclass = types.TypeRef(type(arrtype))
+        argtypes = signature(mip, arytypeclass, types.intp, types.uint32)
+        args = (context.get_dummy_value(), allocsize, align)
+        meminfo = context.compile_internal(builder, _call_allocator, argtypes, args)
+        data = context.nrt.meminfo_data(builder, meminfo)
 
     intp_t = context.get_value_type(types.intp)
     shape_array = cgutils.pack_array(builder, shapes, ty=intp_t)
@@ -4325,7 +4365,6 @@ def _empty_nd_impl(context, builder, arrtype, shapes):
                    meminfo=meminfo)
 
     return ary
-
 
 @overload_classmethod(types.Array, "_allocate", target="CPU")
 def _ol_array_allocate(cls, allocsize, align):

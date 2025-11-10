@@ -75,7 +75,7 @@ class _Runtime(object):
         self._init_guard()
         mi = _nrt.meminfo_new(data, pyobj)
         return MemInfo(mi)
-
+# Debug - safe = true, not false
     def meminfo_alloc(self, size, safe=False):
         """
         Allocate a new memory of `size` bytes and returns a MemInfo object

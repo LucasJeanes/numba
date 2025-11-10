@@ -296,33 +296,34 @@ NRT_MemInfo* NRT_MemInfo_alloc_dtor(size_t size, NRT_dtor_function dtor) {
 }
 
 static
-void *nrt_allocate_meminfo_and_data_align(size_t size, unsigned align,
+  void *nrt_allocate_meminfo_and_data_align(size_t size, unsigned align,
                                           NRT_MemInfo **mi, NRT_ExternalAllocator *allocator)
 {
     size_t offset = 0, intptr = 0, remainder = 0;
     NRT_Debug(nrt_debug_print("nrt_allocate_meminfo_and_data_align %p\n", allocator));
-    char *base = (char *)nrt_allocate_meminfo_and_data(size + 2 * align, mi, allocator);
+
+    // Compute effective alignment: at least sizeof(void*) and minimum 16 bytes
+    unsigned effective_align = align;
+    if (effective_align < (unsigned)sizeof(void*)) effective_align = sizeof(void*);
+    if (effective_align < 16u) effective_align = 16u;
+
+    // Allocate enough memory to guarantee alignment
+    char *base = (char *)nrt_allocate_meminfo_and_data(size + 2 * effective_align, mi, allocator);
     if (base == NULL) {
-        return NULL; /* return early as allocation failed */
+        return NULL; /* allocation failed */
     }
+
     intptr = (size_t) base;
-    /*
-     * See if the allocation is aligned already...
-     * Check if align is a power of 2, if so the modulo can be avoided.
-     */
-    if((align & (align - 1)) == 0)
-    {
-        remainder = intptr & (align - 1);
+
+    // Check if allocation is already aligned
+    if ((effective_align & (effective_align - 1)) == 0) {
+        remainder = intptr & (effective_align - 1);
+    } else {
+        remainder = intptr % effective_align;
     }
-    else
-    {
-        remainder = intptr % align;
-    }
-    if (remainder == 0){ /* Yes */
-        offset = 0;
-    } else { /* No, move forward `offset` bytes */
-        offset = align - remainder;
-    }
+
+    offset = (remainder == 0) ? 0 : (effective_align - remainder);
+
     return (void*)((char *)base + offset);
 }
 

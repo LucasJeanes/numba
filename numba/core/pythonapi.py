@@ -3,7 +3,7 @@ import contextlib
 import pickle
 import hashlib
 import sys
-
+from platform import machine as get_architecture
 from llvmlite import ir
 from llvmlite.ir import Constant
 
@@ -25,6 +25,7 @@ class _Registry(object):
 
     def __init__(self):
         self.functions = {}
+        arch_s390x = True if get_architecture() == "s390x" else False
 
     def register(self, typeclass):
         assert issubclass(typeclass, types.Type)
@@ -1219,6 +1220,9 @@ class PythonAPI(object):
     def nrt_adapt_ndarray_to_python(self, aryty, ary, dtypeptr):
         assert self.context.enable_nrt, "NRT required"
 
+        print(f"DEBUG nrt_adapt_ndarray_to_python: ndim={aryty.ndim}, mutable={aryty.mutable}")
+
+        print("DEBUG nrt_adapt_ndarray pythonapi.py architecture={arch_s390x}")
         intty = ir.IntType(32)
         # Embed the Python type of the array (maybe subclass) in the LLVM IR.
         serial_aryty_pytype = self.unserialize(self.serialize_object(aryty.box_type))
@@ -1230,12 +1234,26 @@ class PythonAPI(object):
 
         ndim = self.context.get_constant(types.int32, aryty.ndim)
         writable = self.context.get_constant(types.int32, int(aryty.mutable))
+        print(f"DEBUG: Using intty={intty}, ndim type={ndim.type}, writable type={writable.type}")
+        # ndim may be i64, function expects i32
+#        if ndim.type.width > 32:
+#            ndim = self.builder.trunc(ndim, intty)
+#        elif ndim.type.width < 32:
+#            ndim.self.builder.zext(ndim, intty)
+
+        # writable may be i64, function expects i32
+#        if writable.type.width > 32:
+#            writable = self.builder.trunc(writable, intty)
+#        elif writable.type.width < 32:
+#            writable.self.builder.zext(writable, intty)
 
         aryptr = cgutils.alloca_once_value(self.builder, ary)
-        return self.builder.call(fn, [self.builder.bitcast(aryptr,
+        result = self.builder.call(fn, [self.builder.bitcast(aryptr,
                                                            self.voidptr),
                                       serial_aryty_pytype,
                                       ndim, writable, dtypeptr])
+        print(f"DEBUG: nrt_adapt_ndarray_to_python result type: {result.type}")
+        return result
 
     def nrt_meminfo_new_from_pyobject(self, data, pyobj):
         """
@@ -1291,6 +1309,7 @@ class PythonAPI(object):
         fn = self._get_function(fnty, name="NRT_adapt_ndarray_from_python")
         fn.args[0].add_attribute('nocapture')
         fn.args[1].add_attribute('nocapture')
+        #print("arystruct: meminfo=%p, data=%p, nitems=%zd, itemsize=%zd\n",arystruct->meminfo, arystruct->data, arystruct->nitems, arystruct->itemsize);
         return self.builder.call(fn, (ary, ptr))
 
     def nrt_adapt_buffer_from_python(self, buf, ptr):
@@ -1365,6 +1384,14 @@ class PythonAPI(object):
         ptr = self.builder.extract_value(self.builder.load(structptr), 0)
         n = self.builder.extract_value(self.builder.load(structptr), 1)
         hashed = self.builder.extract_value(self.builder.load(structptr), 2)
+        
+        # Ensure n is exactly i32 to match C function ABI
+        int32_ty = ir.IntType(32)
+        if n.type.width > 32:
+            n = self.builder.trunc(n, int32_ty) # truncate high bits
+        elif n.type.width < 32:
+            n = self.builder.zext(n, int32_ty) # zero-extend
+
         return self.builder.call(fn, (ptr, n, hashed))
 
     def build_dynamic_excinfo_struct(self, struct_gv, exc_args):
